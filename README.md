@@ -6,7 +6,8 @@ A set of tools for controlling WordPress installations from the command line.
 Requirements
 ------------
 
-PHP >= 5.3
+* PHP >= 5.3
+* WP >= 3.3
 
 Installing
 ----------
@@ -21,9 +22,9 @@ sudo pear install wp-cli.github.com/pear/wpcli
 **Via GIT:**
 
 ```sh
-git clone --recurse-submodules git://github.com/wp-cli/wp-cli.git ~/git/wp-cli
+git clone --recursive git://github.com/wp-cli/wp-cli.git ~/git/wp-cli
 cd ~/git/wp-cli
-sudo utils/build-dev
+sudo utils/dev-build
 ```
 
 You can replace `~/git/wp-cli` with whatever you want.
@@ -153,4 +154,4 @@ Contributors
 ------------
 
 - [Contributor list](https://github.com/wp-cli/wp-cli/contributors)
-- [Contributor impact](https://github.com/wp-cli/wp-cli/graphs/impact)
+- [Contributor guide](https://github.com/wp-cli/wp-cli/wiki/Commands-Cookbook)

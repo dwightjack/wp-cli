@@ -1,6 +1,6 @@
 <?php
 
-WP_CLI::addCommand('generate', 'GenerateCommand');
+WP_CLI::add_command('generate', 'Generate_Command');
 
 /**
  * Implement generate command
@@ -8,7 +8,7 @@ WP_CLI::addCommand('generate', 'GenerateCommand');
  * @package wp-cli
  * @subpackage commands/internals
  */
-class GenerateCommand extends WP_CLI_Command {
+class Generate_Command extends WP_CLI_Command {
 
 	/**
 	 * Generate posts
@@ -21,6 +21,7 @@ class GenerateCommand extends WP_CLI_Command {
 
 		$defaults = array(
 			'count' => 100,
+			'max_depth' => 1,
 			'type' => 'post',
 			'status' => 'publish',
 			'author' => false
@@ -45,22 +46,58 @@ class GenerateCommand extends WP_CLI_Command {
 
 		$label = get_post_type_object( $type )->labels->singular_name;
 
+		$hierarchical = get_post_type_object( $type )->hierarchical;
+
 		$limit = $count + $total;
 
 		$notify = new \cli\progress\Bar( 'Generating posts', $count );
 
+		$current_depth = 1;
+		$current_parent = 0;
+
 		for ( $i = $total; $i < $limit; $i++ ) {
-			wp_insert_post( array(
+
+			if ( $hierarchical ) {
+
+				if( $this->maybe_make_child() && $current_depth < $max_depth ) {
+
+					$current_parent = $post_ids[$i-1];
+					$current_depth++;
+
+				} else if( $this->maybe_reset_depth() ) {
+
+					$current_depth = 1;
+					$current_parent = 0;
+
+				}
+			}
+
+			$args = array(
 				'post_type' => $type,
 				'post_title' =>  "$label $i",
 				'post_status' => $status,
-				'post_author' => $author
-			) );
+				'post_author' => $author,
+				'post_parent' => $current_parent,
+				'post_name' => "post-$i"
+			);
+
+			// Not using wp_insert_post() because it's slow
+			$wpdb->insert( $wpdb->posts, $args );
 
 			$notify->tick();
 		}
 
 		$notify->finish();
+	}
+
+	private function maybe_make_child() {
+		// 50% chance of making child post
+		return ( mt_rand(1,2) == 1 ) ? true: false;
+	}
+
+	private function maybe_reset_depth() {
+		// 10% chance of reseting to root depth
+		return ( mt_rand(1,10) == 7 ) ? true : false;
 	}
 
 	/**
@@ -115,16 +152,5 @@ class GenerateCommand extends WP_CLI_Command {
 		}
 
 		$notify->finish();
-	}
-
-	/**
-	 * Help function for this command
-	 */
-	public static function help() {
-		WP_CLI::line( <<<EOB
-usage: wp generate posts [--count=100] [--type=post] [--status=publish] [--author=<login>]
-   or: wp generate users [--count=100] [--role=<role>]
-EOB
-	);
 	}
 }

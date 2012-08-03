@@ -1,6 +1,6 @@
 <?php
 
-WP_CLI::addCommand('export', 'ExportCommand');
+WP_CLI::add_command('export', 'Export_Command');
 
 /**
  * Implement export command
@@ -8,30 +8,7 @@ WP_CLI::addCommand('export', 'ExportCommand');
  * @package wp-cli
  * @subpackage commands/internals
  */
-class ExportCommand extends WP_CLI_Command {
-	protected $default_subcommand = 'validate_arguments';
-
-	public $export_args = array();
-
-	public static function help() {
-		WP_CLI::line( <<<EOB
-usage: wp export --path=<export-path> --user=<username/id>
-   or: wp export --path=/tmp/ --user=admin --post_type=post --start_date=2011-01-01 --end_date=2011-12-31
-
-Required parameters:
-	--path			Full Path to directory where WXR export files should be stored
-
-Optional filters:
-	--start_date       Export only posts new than this date in format YYYY-MM-DD
-	--end_date         Export only posts older than this date in format YYYY-MM-DD
-	--post_type        Export only posts with this post_type
-	--author           Export only posts by this author
-	--category         Export only posts in this category
-	--post_status      Export only posts with this post_status
-	--skip_comments    Don't export comments
-EOB
-	);
-	}
+class Export_Command extends WP_CLI_Command {
 
 	/**
 	 * Argument validation functions below
@@ -60,8 +37,8 @@ EOB
 			}
 		}
 
-		if ( true === $has_errors ) {
-			exit;
+		if ( $has_errors ) {
+			exit(1);
 		}
 
 		$this->wxr_path = $assoc_args['path'];
@@ -79,7 +56,6 @@ EOB
 
 		if ( !is_dir( $path ) ) {
 			WP_CLI::error( sprintf( "The path %s does not exist", $path ) );
-			exit;
 		}
 
 		return true;

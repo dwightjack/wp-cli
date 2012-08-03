@@ -1,6 +1,6 @@
 <?php
 
-WP_CLI::addCommand('option', 'OptionCommand');
+WP_CLI::add_command('option', 'Option_Command');
 
 /**
  * Implement option command
@@ -8,20 +8,26 @@ WP_CLI::addCommand('option', 'OptionCommand');
  * @package wp-cli
  * @subpackage commands/internals
  */
-class OptionCommand extends WP_CLI_Command {
+class Option_Command extends WP_CLI_Command {
+
+	protected $aliases = array(
+		'set' => 'update'
+	);
 
 	/**
 	 * Add an option
 	 *
 	 * @param array $args
 	 **/
-	public function add( $args ) {
+	public function add( $args, $assoc_args ) {
 		if ( count( $args ) < 2 ) {
 			WP_CLI::line( "usage: wp option add <option-name> <option-value>" );
 			exit;
 		}
 
-		list( $key, $value ) = $args;
+		$key = $args[0];
+
+		$value = WP_CLI::read_value( $args[1], $assoc_args );
 
 		if ( !add_option( $key, $value ) ) {
 			WP_CLI::error( "Could not add option '$key'. Does it already exist?" );
@@ -33,13 +39,15 @@ class OptionCommand extends WP_CLI_Command {
 	 *
 	 * @param array $args
 	 **/
-	public function update( $args ) {
+	public function update( $args, $assoc_args ) {
 		if ( count( $args ) < 2 ) {
 			WP_CLI::line( "usage: wp option update <option-name> <option-value>" );
 			exit;
 		}
 
-		list( $key, $value ) = $args;
+		$key = $args[0];
+
+		$value = WP_CLI::read_value( $args[1], $assoc_args );
 
 		if ( $value === get_option( $key ) )
 			return;
@@ -72,7 +80,7 @@ class OptionCommand extends WP_CLI_Command {
 	 *
 	 * @param array $args
 	 **/
-	public function get( $args ) {
+	public function get( $args, $assoc_args ) {
 		if ( empty( $args ) ) {
 			WP_CLI::line( "usage: wp option get <option-name>" );
 			exit;
@@ -83,25 +91,8 @@ class OptionCommand extends WP_CLI_Command {
 		$value = get_option( $key );
 
 		if ( false === $value )
-			return;
+			die(1);
 
-		if ( is_array( $value ) || is_object( $value ) ) {
-			echo var_export( $value ) . "\n";
-		} else {
-			echo $value . "\n";
-		}
-	}
-
-	/**
-	 * Help function for this command
-	 */
-	public static function help() {
-		WP_CLI::line( <<<EOB
-usage: wp option get <option-name>
-   or: wp option add <option-name> <option-value>
-   or: wp option update <option-name> <option-value>
-   or: wp option delete <option-name>
-EOB
-	    );
+		WP_CLI::print_value( $value, $assoc_args );
 	}
 }

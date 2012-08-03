@@ -1,6 +1,6 @@
 <?php
 
-WP_CLI::addCommand('core', 'CoreCommand');
+WP_CLI::add_command('core', 'Core_Command');
 
 /**
  * Implement core command
@@ -8,7 +8,7 @@ WP_CLI::addCommand('core', 'CoreCommand');
  * @package wp-cli
  * @subpackage commands/internals
  */
-class CoreCommand extends WP_CLI_Command {
+class Core_Command extends WP_CLI_Command {
 
 	/**
 	 * Download the core files from wordpress.org
@@ -17,42 +17,47 @@ class CoreCommand extends WP_CLI_Command {
 		if ( is_readable( WP_ROOT . 'wp-load.php' ) )
 			WP_CLI::error( 'WordPress files seem to already be present here.' );
 
-		if (isset($assoc_args['path']))
+		if ( isset( $assoc_args['path'] ) )
 			$docroot = $assoc_args['path'];
 		else
 			$docroot = './';
-	
-		if (isset($assoc_args['version'])) {
-			$download_url = 'http://wordpress.org/wordpress-' . $assoc_args['version'] . '.zip';
+
+		if ( isset( $assoc_args['locale'] ) ) {
+			exec( 'curl -s ' . escapeshellarg( 'http://api.wordpress.org/core/version-check/1.5/?locale=' . $assoc_args['locale'] ), $lines, $r );
+			if ($r) exit($r);
+			$download_url = str_replace( '.zip', '.tar.gz', $lines[2] );
+			WP_CLI::line( sprintf( 'Downloading WordPress %s (%s)...', $lines[3], $lines[4] ) );
+		} elseif ( isset( $assoc_args['version'] ) ) {
+			$download_url = 'http://wordpress.org/wordpress-' . $assoc_args['version'] . '.tar.gz';
+			WP_CLI::line( sprintf( 'Downloading WordPress %s (%s)...', $assoc_args['version'], 'en_US' ) );
 		} else {
-			$download_url = 'http://wordpress.org/latest.zip';
-		}
-		$version_check_response = wp_remote_head($download_url);
-		if (!$version_check_response || $version_check_response['headers']['content-type'] != 'application/octet-stream') {
-			WP_CLI::error( 'Unable to download remote file ' . $download_url);
-			exit();
+			$download_url = 'http://wordpress.org/latest.tar.gz';
+			WP_CLI::line( sprintf( 'Downloading latest WordPress (%s)...', 'en_US' ) );
 		}
 
-		WP_CLI::line('Downloading WordPress...');
-		exec("curl {$download_url} > /tmp/wordpress.zip");
-		exec("unzip /tmp/wordpress.zip");
-		exec("mv wordpress/* $docroot");
-		exec("rm -r wordpress");
-		WP_CLI::success('WordPress downloaded.');
+		WP_CLI::launch( 'curl -f' . (WP_CLI_SILENT ? ' --silent ' : ' ') . escapeshellarg( $download_url ) . ' | tar xz' );
+		WP_CLI::launch( 'mv wordpress/* . && rm -rf wordpress' );
+
+		WP_CLI::success( 'WordPress downloaded.' );
 	}
 
 	/**
 	 * Set up a wp-config.php file.
 	 */
 	public function config( $args, $assoc_args ) {
-		$_POST['dbname'] = $assoc_args['name'];
-		$_POST['uname'] = $assoc_args['user'];
-		$_POST['pwd'] = $assoc_args['pass'];
-		$_POST['dbhost'] = isset( $assoc_args['host'] ) ? $assoc_args['host'] : 'localhost';
-		$_POST['prefix'] = isset( $assoc_args['prefix'] ) ? $assoc_args['prefix'] : 'wp_';
+		WP_CLI::check_required_args( array( 'dbname', 'dbuser', 'dbpass' ), $assoc_args );
+
+		$_POST['dbname'] = $assoc_args['dbname'];
+		$_POST['uname'] = $assoc_args['dbuser'];
+		$_POST['pwd'] = $assoc_args['dbpass'];
+		$_POST['dbhost'] = isset( $assoc_args['dbhost'] ) ? $assoc_args['dbhost'] : 'localhost';
+		$_POST['prefix'] = isset( $assoc_args['dbprefix'] ) ? $assoc_args['dbprefix'] : 'wp_';
 
 		$_GET['step'] = 2;
+
+		if ( WP_CLI_SILENT ) ob_start();
 		require WP_ROOT . '/wp-admin/setup-config.php';
+		if ( WP_CLI_SILENT ) ob_end_clean();
 	}
 
 	/**
@@ -66,36 +71,82 @@ class CoreCommand extends WP_CLI_Command {
 		}
 
 		extract( wp_parse_args( $assoc_args, array(
-			'site_url' => defined( 'WP_SITEURL' ) ? WP_SITEURL : '',
-			'site_title' => '',
+			'title' => '',
 			'admin_name' => 'admin',
 			'admin_email' => '',
 			'admin_password' => ''
 		) ), EXTR_SKIP );
 
-		$missing = false;
-		foreach ( array( 'site_url', 'site_title', 'admin_email', 'admin_password' ) as $required_arg ) {
-			if ( empty( $$required_arg ) ) {
-				WP_CLI::warning( "missing --$required_arg parameter" );
-				$missing = true;
-			}
-		}
-
-		if ( $site_url )
-			WP_CLI::set_url_params( $site_url );
-
-		if ( $missing )
-			exit(1);
-
 		$public = true;
 
-		$result = wp_install( $site_title, $admin_name, $admin_email, $public, '', $admin_password );
+		$result = wp_install( $title, $admin_name, $admin_email, $public, '', $admin_password );
 
 		if ( is_wp_error( $result ) ) {
-			WP_CLI::error( 'Installation failed (' . WP_CLI::errorToString($result) . ').' );
+			WP_CLI::error( 'Installation failed (' . WP_CLI::error_to_string($result) . ').' );
 		} else {
 			WP_CLI::success( 'WordPress installed successfully.' );
 		}
+	}
+
+	public function install_network( $args, $assoc_args ) {
+		if ( is_multisite() )
+			WP_CLI::error( 'This already is a multisite install.' );
+
+		global $wpdb;
+
+		require_once( ABSPATH . 'wp-admin/includes/upgrade.php' );
+
+		// need to register the multisite tables manually for some reason
+		foreach ( $wpdb->tables( 'ms_global' ) as $table => $prefixed_table )
+			$wpdb->$table = $prefixed_table;
+
+		WP_CLI::check_required_args( array( 'title' ), $assoc_args );
+
+		extract( wp_parse_args( $assoc_args, array(
+			'base' => '/',
+		) ) );
+
+		$hostname = self::get_clean_basedomain();
+		$subdomain_install = isset( $assoc_args['subdomains'] );
+
+		install_network();
+
+		$result = populate_network( 1, $hostname, get_option( 'admin_email' ), $assoc_args['title'], $base, $subdomain_install );
+
+		if ( is_wp_error( $result ) )
+			WP_CLI::error( $result );
+
+		ob_start();
+?>
+define('MULTISITE', true);
+define('SUBDOMAIN_INSTALL', <?php echo $subdomain_install ? 'true' : 'false'; ?>);
+$base = '<?php echo $base; ?>';
+define('DOMAIN_CURRENT_SITE', '<?php echo $hostname; ?>');
+define('PATH_CURRENT_SITE', '<?php echo $base; ?>');
+define('SITE_ID_CURRENT_SITE', 1);
+define('BLOG_ID_CURRENT_SITE', 1);
+
+<?php
+		$ms_config = ob_get_clean();
+
+		$wp_config_path = WP_CLI::locate_wp_config();
+
+		$token = "/* That's all, stop editing!";
+
+		list( $before, $after ) = explode( $token, file_get_contents( $wp_config_path ) );
+
+		file_put_contents( $wp_config_path, $before . $ms_config . $token . $after );
+
+		wp_mkdir_p( WP_CONTENT_DIR . '/blogs.dir' );
+
+		WP_CLI::success( "Network installed. Don't forget to set up rewrite rules." );
+	}
+
+	private static function get_clean_basedomain() {
+		$domain = preg_replace( '|https?://|', '', get_option( 'siteurl' ) );
+		if ( $slash = strpos( $domain, '/' ) )
+			$domain = substr( $domain, 0, $slash );
+		return $domain;
 	}
 
 	/**
@@ -137,43 +188,77 @@ class CoreCommand extends WP_CLI_Command {
 	 * Update the WordPress core
 	 *
 	 * @param array $args
+	 * @param array $assoc_args
 	 */
-	function update( $args ) {
-		wp_version_check();
+	function update( $args, $assoc_args ) {
+		global $wp_version;
+		$update = $from_api = null;
+		$upgrader = 'Core_Upgrader';
 
-		$from_api = get_site_transient( 'update_core' );
+		if ( empty( $assoc_args['version'] ) ) {
+			wp_version_check();
+			$from_api = get_site_transient( 'update_core' );
 
-		if ( empty( $from_api->updates ) )
-			$update = false;
-		else
-			list( $update ) = $from_api->updates;
+			if ( empty( $from_api->updates ) )
+				$update = false;
+			else
+				list( $update ) = $from_api->updates;
+
+		} else if (	version_compare( $wp_version, $assoc_args['version'], '<' )
+					|| isset( $assoc_args['force'] ) ) {
+
+			$new_package = null;
+
+			if ( empty( $args[0] ) ) {
+				$new_package = 'http://wordpress.org/wordpress-' . $assoc_args['version'] . '.zip';
+				WP_CLI::line( sprintf( 'Downloading WordPress %s (%s)...', $assoc_args['version'], 'en_US' ) );
+			} else {
+				$new_package = $args[0];
+				$upgrader = 'Non_Destructive_Core_Upgrader';
+			}
+
+			$update = (object) array(
+				'response' => 'upgrade',
+				'current' => $assoc_args['version'],
+				'download' => $new_package,
+				'packages' => (object) array (
+					'partial' => null,
+					'new_bundled' => null,
+					'no_content' => null,
+					'full' => $new_package,
+				),
+			);
+
+		} else {
+			WP_CLI::success( 'WordPress is up to date.' );
+			return;
+		}
 
 		require_once( ABSPATH . 'wp-admin/includes/upgrade.php' );
 
-		$result = WP_CLI::get_upgrader( 'Core_Upgrader' )->upgrade( $update );
+		$result = WP_CLI::get_upgrader( $upgrader )->upgrade( $update );
 
 		if ( is_wp_error($result) ) {
-			$msg = WP_CLI::errorToString( $result );
+			$msg = WP_CLI::error_to_string( $result );
 			if ( 'up_to_date' != $result->get_error_code() ) {
 				WP_CLI::error( $msg );
 			} else {
 				WP_CLI::success( $msg );
 			}
 		} else {
-			WP_CLI::success('WordPress updated successfully.');
+			WP_CLI::success( 'WordPress updated successfully.' );
 		}
 	}
 
 	/**
-	 * Help function for this command
+	 * Update the WordPress database
+	 *
+	 * @param array $args
+	 * @param array $assoc_args
 	 */
-	public static function help() {
-		WP_CLI::line( <<<EOB
-usage: wp core update
-   or: wp core version [--extra]
-   or: wp core install --site_url=example.com --site_title=<site-title> [--admin_name=<username>] --admin_password=<password> --admin_email=<email-address>
-EOB
-	);
+	function update_db() {
+		require_once( ABSPATH . 'wp-admin/includes/upgrade.php' );
+		wp_upgrade();
+		WP_CLI::success( 'WordPress database upgraded successfully.' );
 	}
 }
-

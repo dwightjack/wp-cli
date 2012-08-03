@@ -1,6 +1,6 @@
 <?php
 
-WP_CLI::addCommand('plugin', 'PluginCommand');
+WP_CLI::add_command('plugin', 'Plugin_Command');
 
 /**
  * Implement plugin command
@@ -8,7 +8,7 @@ WP_CLI::addCommand('plugin', 'PluginCommand');
  * @package wp-cli
  * @subpackage commands/internals
  */
-class PluginCommand extends WP_CLI_Command_With_Upgrade {
+class Plugin_Command extends WP_CLI_Command_With_Upgrade {
 
 	protected $item_type = 'plugin';
 	protected $upgrader = 'Plugin_Upgrader';
@@ -24,21 +24,8 @@ class PluginCommand extends WP_CLI_Command_With_Upgrade {
 		parent::__construct( $args, $assoc_args );
 	}
 
-	/**
-	 * Get the status of one or all plugins
-	 *
-	 * @param array $args
-	 */
-	function status( $args = array(), $vars = array() ) {
-		$this->mu_plugins = get_mu_plugins();
-
-		if ( empty( $args ) ) {
-			$this->list_plugins();
-			return;
-		}
-
-		list( $file, $name ) = $this->parse_name( $args, __FUNCTION__ );
-
+	// Show details about a single plugin
+	protected function status_single( $file, $name ) {
 		$details = $this->get_details( $file );
 
 		$status = $this->get_status( $file, true );
@@ -56,9 +43,9 @@ class PluginCommand extends WP_CLI_Command_With_Upgrade {
 		WP_CLI::line( '    Description: ' . $details[ 'Description' ] );
 	}
 
-	private function list_plugins() {
-		// Force WordPress to update the plugin list
-		wp_update_plugins();
+	// Show details about all plugins
+	protected function status_all() {
+		$this->mu_plugins = get_mu_plugins();
 
 		$plugins = get_plugins();
 
@@ -121,15 +108,17 @@ class PluginCommand extends WP_CLI_Command_With_Upgrade {
 	 *
 	 * @param array $args
 	 */
-	function activate( $args ) {
+	function activate( $args, $assoc_args = array() ) {
 		list( $file, $name ) = $this->parse_name( $args, __FUNCTION__ );
 
-		activate_plugin( $file );
+		$network_wide = isset( $assoc_args['network'] );
 
-		if ( !is_plugin_active( $file ) ) {
-			WP_CLI::error( 'Could not activate this plugin: ' . $name );
-		} else {
+		activate_plugin( $file, '', $network_wide );
+
+		if ( $this->check_active( $file, $network_wide ) ) {
 			WP_CLI::success( "Plugin '$name' activated." );
+		} else {
+			WP_CLI::error( 'Could not activate plugin: ' . $name );
 		}
 	}
 
@@ -138,16 +127,28 @@ class PluginCommand extends WP_CLI_Command_With_Upgrade {
 	 *
 	 * @param array $args
 	 */
-	function deactivate( $args ) {
+	function deactivate( $args, $assoc_args = array() ) {
 		list( $file, $name ) = $this->parse_name( $args, __FUNCTION__ );
 
-		deactivate_plugins( $file );
+		$network_wide = isset( $assoc_args['network'] );
 
-		if ( !is_plugin_inactive( $file ) ) {
-			WP_CLI::error( 'Could not deactivate this plugin: '.$name );
-		} else {
+		deactivate_plugins( $file, false, $network_wide );
+
+		if ( ! $this->check_active( $file, $network_wide ) ) {
 			WP_CLI::success( "Plugin '$name' deactivated." );
+		} else {
+			WP_CLI::error( 'Could not deactivate plugin: ' . $name );
 		}
+	}
+
+	private function check_active( $file, $network_wide ) {
+		if ( $network_wide ) {
+			$check = is_plugin_active_for_network( $file );
+		} else {
+			$check = is_plugin_active( $file );
+		}
+
+		return $check;
 	}
 
 	/**
@@ -155,13 +156,15 @@ class PluginCommand extends WP_CLI_Command_With_Upgrade {
 	 *
 	 * @param array $args
 	 */
-	function toggle( $args ) {
+	function toggle( $args, $assoc_args = array() ) {
 		list( $file, $name ) = $this->parse_name( $args, __FUNCTION__ );
 
-		if ( is_plugin_active( $file ) ) {
-			$this->deactivate( $args );
+		$network_wide = isset( $assoc_args['network'] );
+
+		if ( $this->check_active( $file, $network_wide ) ) {
+			$this->deactivate( $args, $assoc_args );
 		} else {
-			$this->activate( $args );
+			$this->activate( $args, $assoc_args );
 		}
 	}
 
@@ -185,45 +188,31 @@ class PluginCommand extends WP_CLI_Command_With_Upgrade {
 		WP_CLI::line( $path );
 	}
 
-	/**
-	 * Install a new plugin
-	 *
-	 * @param array $args
-	 * @param array $assoc_args
-	 */
-	function install( $args, $assoc_args ) {
-		if ( empty( $args ) ) {
-			WP_CLI::line( "usage: wp plugin install <plugin-name>" );
-			exit;
-		}
-
-		$slug = stripslashes( $args[0] );
-
-		// Force WordPress to update the plugin list
-		wp_update_plugins();
-
+	protected function install_from_repo( $slug, $assoc_args ) {
 		$api = plugins_api( 'plugin_information', array( 'slug' => $slug ) );
-		if ( !$api ) {
-			WP_CLI::error( 'Can\'t find the plugin in the WordPress.org plugins repository.' );
-			exit();
+
+		if ( is_wp_error( $api ) ) {
+			if ( null === maybe_unserialize( $api->get_error_data() ) )
+				WP_CLI::error( "Can't find the plugin in the WordPress.org repository." );
+			else
+				WP_CLI::error( $api );
 		}
 
-		if ( isset( $assoc_args['dev'] ) ) {
+		if ( isset( $assoc_args['version'] ) ) {
 			list( $link ) = explode( $slug, $api->download_link );
 
-			$api->download_link = $link . $slug . '.zip';
-			$api->version = 'Development Version';
-		} else if ( isset( $assoc_args['version'] ) ) {
-			list( $link ) = explode( $slug, $api->download_link );
+			if ( 'dev' == $assoc_args['version'] ) {
+				$api->download_link = $link . $slug . '.zip';
+				$api->version = 'Development Version';
+			} else {
+				$api->download_link = $link . $slug . '.' . $assoc_args['version'] .'.zip';
+				$api->version = $assoc_args['version'];
 
-			$api->download_link = $link . $slug . '.' . $assoc_args['version'] .'.zip';
-			$api->version = $assoc_args['version'];
-			
-			//check if the requested version exists
-			$version_check_response = wp_remote_head($api->download_link);
-			if (!$version_check_response || $version_check_response['headers']['content-type'] != 'application/octet-stream') {
-				WP_CLI::error( 'Can\'t find the requested plugin\'s version ' . $assoc_args['version'] . ' in the WordPress.org plugins repository.');
-				exit();
+				// check if the requested version exists
+				$response = wp_remote_head( $api->download_link );
+				if ( !$response || $response['headers']['content-type'] != 'application/octet-stream' ) {
+					WP_CLI::error( "Can't find the requested plugin's version " . $assoc_args['version'] . " in the WordPress.org plugins repository." );
+				}
 			}
 		}
 
@@ -234,22 +223,36 @@ class PluginCommand extends WP_CLI_Command_With_Upgrade {
 		switch ( $status['status'] ) {
 		case 'update_available':
 		case 'install':
-			$upgrader = WP_CLI::get_upgrader( 'Plugin_Upgrader' );
+			$upgrader = WP_CLI::get_upgrader( $this->upgrader );
 			$result = $upgrader->install( $api->download_link );
 
-			if ( $result ) {
-				if ( isset( $assoc_args['activate'] ) ) {
-					system( "wp plugin activate " . WP_CLI::compose_args( $args, $assoc_args ) );
-				}
+			if ( $result && isset( $assoc_args['activate'] ) ) {
+				WP_CLI::line( "Activating '$slug'..." );
+				$this->activate( array( $slug ) );
 			}
 
 			break;
 		case 'newer_installed':
-			WP_CLI::error( sprintf( 'Newer version (%s) installed', $status['version'] ) );
+			WP_CLI::error( sprintf( 'Newer version (%s) installed.', $status['version'] ) );
 			break;
 		case 'latest_installed':
-			WP_CLI::error( 'Latest version already installed' );
+			WP_CLI::error( 'Latest version already installed.' );
 			break;
+		}
+	}
+
+	/**
+	 * Update a plugin (to the latest dev version)
+	 *
+	 * @param array $args
+	 * @param array $assoc_args
+	 */
+	function update( $args, $assoc_args ) {
+		if ( isset( $assoc_args['version'] ) && 'dev' == $assoc_args['version'] ) {
+			$this->delete( $args, array(), false );
+			$this->install( $args, $assoc_args );
+		} else {
+			parent::update( $args, $assoc_args );
 		}
 	}
 
@@ -262,7 +265,7 @@ class PluginCommand extends WP_CLI_Command_With_Upgrade {
 	 *
 	 * @param array $args
 	 */
-	function uninstall( $args ) {
+	function uninstall( $args, $assoc_args = array() ) {
 		list( $file, $name ) = $this->parse_name( $args, __FUNCTION__ );
 
 		if ( is_plugin_active( $file ) ) {
@@ -270,23 +273,26 @@ class PluginCommand extends WP_CLI_Command_With_Upgrade {
 		}
 
 		uninstall_plugin( $file );
+
+		if ( !isset( $assoc_args['no-delete'] ) )
+			$this->delete( $args );
 	}
 
 	/**
-	 * Delete a plugin
+	 * Delete plugin files
 	 *
 	 * @param array $args
 	 */
-	function delete( $args ) {
+	function delete( $args, $assoc_args = array(), $exit_on_error = true ) {
 		list( $file, $name ) = $this->parse_name( $args, __FUNCTION__ );
 
-		if ( is_plugin_active( $file ) ) {
-			WP_CLI::error( 'The plugin is active.' );
-		}
+		$plugin_dir = dirname( $file );
+		if ( '.' == $plugin_dir )
+			$plugin_dir = $file;
 
-		if ( !delete_plugins( array( $file ) ) ) {
-			WP_CLI::error( 'There was an error while deleting the plugin.' );
-		}
+		$command = 'rm -rf ' . path_join( WP_PLUGIN_DIR, $plugin_dir );
+
+		return WP_CLI::launch( $command, $exit_on_error );
 	}
 
 	/* PRIVATES */
@@ -327,50 +333,15 @@ class PluginCommand extends WP_CLI_Command_With_Upgrade {
 		}
 		else {
 			$file = $name . '.php';
-		}
 
-		$plugins = get_plugins();
+			$plugins = get_plugins();
 
-		if ( !isset( $plugins[$file] ) ) {
-			WP_CLI::error( "The plugin '$name' could not be found." );
-			exit();
+			if ( !isset( $plugins[$file] ) ) {
+				WP_CLI::error( "The plugin '$name' could not be found." );
+				exit();
+			}
 		}
 
 		return array( $file, $name );
-	}
-
-	/**
-	 * Help function for this command
-	 */
-	public static function help() {
-		WP_CLI::line( <<<EOB
-usage: wp plugin <sub-command> [<plugin-name>]
-   or: wp plugin path [<plugin-name>] [--dir]
-   or: wp plugin install <plugin-name> [--activate] [--dev]
-
-Available sub-commands:
-   status       display status of all installed plugins or of a particular plugin
-
-   activate     activate a particular plugin
-
-   deactivate   deactivate a particular plugin
-
-   toggle       toggle activation state of a particular plugin
-
-   path         print path to the plugin's file
-      --dir        get the path to the closest parent directory
-
-   install      install a plugin from wordpress.org
-      --activate   activate the plugin after installing it
-      --dev        install the development version
-
-   update       update a plugin from wordpress.org
-      --all        update all plugins from wordpress.org
-
-   uninstall    run the uninstallation procedure for a plugin
-
-   delete       delete a plugin
-EOB
-	);
 	}
 }

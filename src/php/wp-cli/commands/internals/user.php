@@ -1,6 +1,6 @@
 <?php
 
-WP_CLI::addCommand('user', 'UserCommand');
+WP_CLI::add_command('user', 'User_Command');
 
 /**
  * Implement user command
@@ -8,7 +8,7 @@ WP_CLI::addCommand('user', 'UserCommand');
  * @package wp-cli
  * @subpackage commands/internals
  */
-class UserCommand extends WP_CLI_Command {
+class User_Command extends WP_CLI_Command {
 
 	/**
 	 * List users
@@ -60,11 +60,7 @@ class UserCommand extends WP_CLI_Command {
 	public function delete( $args, $assoc_args ) {
 		global $blog_id;
 
-		$user_id = $args[0];
-
-		if ( ! is_numeric($user_id) ) {
-			WP_CLI::error("User ID required (see 'wp user help')");
-		}
+		$user_id = WP_CLI::get_numeric_arg( $args, 0, "User ID" );
 
 		$defaults = array( 'reassign' => NULL );
 
@@ -86,11 +82,10 @@ class UserCommand extends WP_CLI_Command {
 	public function create( $args, $assoc_args ) {
 		global $blog_id;
 
-		$user_login = $args[0];
-		$user_email = $args[1];
+		list( $user_login, $user_email ) = $args[0];
 
 		if ( ! $user_login || ! $user_email ) {
-			WP_CLI::error("Login and email required (see 'wp user help').");
+			WP_CLI::error( "Login and email required." );
 		}
 
 		$defaults = array(
@@ -126,7 +121,10 @@ class UserCommand extends WP_CLI_Command {
 			}
 		}
 
-		WP_CLI::success( "Created user $user_id." );
+		if ( isset( $assoc_args['porcelain'] ) )
+			WP_CLI::line( $user_id );
+		else
+			WP_CLI::success( "Created user $user_id." );
 	}
 
 	/**
@@ -136,11 +134,7 @@ class UserCommand extends WP_CLI_Command {
 	 * @param array $assoc_args
 	 **/
 	public function update( $args, $assoc_args ) {
-		$user_id = $args[0];
-
-		if ( ! is_numeric($user_id) ) {
-			WP_CLI::error( "User ID required (see 'wp user help')." );
-		}
+		$user_id = WP_CLI::get_numeric_arg( $args, 0, "User ID" );
 
 		if ( empty( $assoc_args ) ) {
 			WP_CLI::error( "Need some fields to update." );
@@ -155,18 +149,5 @@ class UserCommand extends WP_CLI_Command {
 		} else {
 			WP_CLI::success( "Updated user $updated_id." );
 		}
-	}
-
-	/**
-	 * Help function for this command
-	 */
-	public static function help() {
-		WP_CLI::line( <<<EOB
-usage: wp user list [--role=<role>]
-   or: wp user create <user_login> <user_email> [--role=<default_role>]
-   or: wp user update <ID> [--field_name=<field_value>]
-   or: wp user delete <ID> [--reassign=<reassign_id>]
-EOB
-	);
 	}
 }

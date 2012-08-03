@@ -16,8 +16,13 @@ class CLI_Upgrader_Skin extends WP_Upgrader_Skin {
 		if ( !$error )
 			return;
 
+		if ( isset( $this->upgrader->strings[$error] ) )
+			$string = $this->upgrader->strings[$error];
+		else
+			$string = $error;
+
 		// TODO: show all errors, not just the first one
-		WP_CLI::warning( WP_CLI::errorToString( $error ) );
+		WP_CLI::warning( $string );
 	}
 
 	function feedback( $string ) {
@@ -40,3 +45,13 @@ class CLI_Upgrader_Skin extends WP_Upgrader_Skin {
 	}
 }
 
+/**
+ * A Core Upgrader class that leaves packages intact by default.
+ *
+ * @package wp-cli
+ */
+class Non_Destructive_Core_Upgrader extends Core_Upgrader {
+	function unpack_package($package, $delete_package = false) {
+		return parent::unpack_package( $package, $delete_package );
+	}
+}

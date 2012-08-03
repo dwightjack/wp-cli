@@ -1,6 +1,6 @@
 <?php
 
-WP_CLI::addCommand('help', 'HelpCommand');
+WP_CLI::add_command('help', 'Help_Command');
 
 /**
  * Implement help command
@@ -8,63 +8,66 @@ WP_CLI::addCommand('help', 'HelpCommand');
  * @package wp-cli
  * @subpackage commands/internals
  */
-class HelpCommand extends WP_CLI_Command {
+class Help_Command extends WP_CLI_Command {
 
-	/**
-	 * Overwrite the constructor to have a command without sub-commands.
-	 *
-	 * @param array $args
-	 */
 	public function __construct( $args ) {
 		if ( empty( $args ) ) {
 			$this->general_help();
+			return;
+		}
+
+		$this->maybe_load_man_page( $args );
+
+		$this->show_available_subcommands( $args[0] );
+	}
+
+	private function maybe_load_man_page( $args ) {
+		$man_dir = WP_CLI_ROOT . "../../../man/";
+
+		if ( !is_dir( $man_dir ) ) {
+			WP_CLI::warning( "man pages do not seem to be installed." );
 		} else {
-			$command = $args[0];
+			$man_file = $man_dir . implode( '-', $args ) . '.1';
 
-			if ( !isset( WP_CLI::$commands[$command] ) ) {
-				WP_CLI::error( "'$command' is not a registered wp command." );
-			} elseif ( 'help' == $command ) {
-				// prevent endless loop
-				$this->general_help();
-			} else {
-				$class = WP_CLI::$commands[$command];
-
-				if ( method_exists( $class, 'help' ) ) {
-					$class::help();
-				} else {
-					WP_CLI::line( 'Example usage:' );
-					$this->single_command_help( $command, $class );
-				}
+			if ( is_readable( $man_file ) ) {
+				exit( WP_CLI::launch( "man $man_file" ) );
 			}
 		}
 	}
 
-	private function general_help() {
-		WP_CLI::line( 'Available commands:' );
-		foreach ( WP_CLI::$commands as $name => $command ) {
-			if ( 'help' == $name )
-				continue;
-
-			$this->single_command_help( $name, $command );
-		}
-		WP_CLI::line();
-		WP_CLI::line( "See 'wp help <command>' for more information on a specific command." );
-		WP_CLI::line();
-		WP_CLI::line( 'Global parameters:' );
-		WP_CLI::line( '    --user=<id|login>   set the current user' );
-		WP_CLI::line( '    --url=<url>         set the current URL' );
-		WP_CLI::line( '    --path=<path>       set the current path to the WP install' );
-		WP_CLI::line( '    --version           print wp-cli version' );
+	private function show_available_subcommands( $command ) {
+		$class = WP_CLI::load_command( $command );
+		WP_CLI_Command::describe_command( $class, $command );
 	}
 
-	private function single_command_help( $name, $command ) {
-		WP_CLI::out( '    wp ' . $name );
+	private function general_help() {
+		WP_CLI::line( 'Available commands:' );
+		foreach ( WP_CLI::load_all_commands() as $command => $class ) {
+			if ( 'help' == $command )
+				continue;
 
-		$methods = WP_CLI_Command::get_subcommands( $command );
+			$out = "    wp $command";
 
-		if ( !empty( $methods ) ) {
-			WP_CLI::out( ' [' . implode( '|', $methods ) . ']' );
+			$methods = WP_CLI_Command::get_subcommands( $class );
+
+			if ( !empty( $methods ) ) {
+				$out .= ' [' . implode( '|', $methods ) . ']';
+			}
+
+			WP_CLI::line( $out );
 		}
-		WP_CLI::line(' ...');
+
+		WP_CLI::line(<<<EOB
+
+See 'wp help <command>' for more information on a specific command.
+
+Global parameters:
+    --user=<id|login>   set the current user
+    --url=<url>         set the current URL
+    --path=<path>       set the current path to the WP install
+    --require=<path>    load a certain file before running the command
+    --version           print wp-cli version
+EOB
+		);
 	}
 }
